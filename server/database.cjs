@@ -62,14 +62,14 @@ class Database {
                 auto_bet BOOLEAN DEFAULT 0,
                 bet_amount REAL DEFAULT 1.0,
                 strategy TEXT DEFAULT 'manual',
-                profit_target REAL DEFAULT 30.0,
-                stop_loss REAL DEFAULT 100.0,
-                min_confidence REAL DEFAULT 0.6,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         `);
+
+        // Adicionar as colunas faltantes à tabela bot_config se não existirem
+        this.addMissingColumns();
 
         // Tabela de resultados da Blaze
         this.db.run(`
@@ -104,11 +104,59 @@ class Database {
         this.createDefaultAdmin();
     }
 
+    addMissingColumns() {
+        // Verificar se as colunas existem e adicioná-las se necessário
+        this.db.serialize(() => {
+            // Verificar estrutura da tabela
+            this.db.all("PRAGMA table_info(bot_config)", (err, columns) => {
+                if (err) {
+                    console.error('Erro ao verificar estrutura da tabela:', err);
+                    return;
+                }
+
+                const columnNames = columns.map(col => col.name);
+                
+                // Adicionar profit_target se não existir
+                if (!columnNames.includes('profit_target')) {
+                    this.db.run(`ALTER TABLE bot_config ADD COLUMN profit_target REAL DEFAULT 30.0`, (err) => {
+                        if (err && !err.message.includes('duplicate column name')) {
+                            console.error('Erro ao adicionar coluna profit_target:', err);
+                        } else {
+                            console.log('✅ Coluna profit_target adicionada com sucesso');
+                        }
+                    });
+                }
+
+                // Adicionar stop_loss se não existir
+                if (!columnNames.includes('stop_loss')) {
+                    this.db.run(`ALTER TABLE bot_config ADD COLUMN stop_loss REAL DEFAULT 100.0`, (err) => {
+                        if (err && !err.message.includes('duplicate column name')) {
+                            console.error('Erro ao adicionar coluna stop_loss:', err);
+                        } else {
+                            console.log('✅ Coluna stop_loss adicionada com sucesso');
+                        }
+                    });
+                }
+
+                // Adicionar min_confidence se não existir
+                if (!columnNames.includes('min_confidence')) {
+                    this.db.run(`ALTER TABLE bot_config ADD COLUMN min_confidence REAL DEFAULT 0.6`, (err) => {
+                        if (err && !err.message.includes('duplicate column name')) {
+                            console.error('Erro ao adicionar coluna min_confidence:', err);
+                        } else {
+                            console.log('✅ Coluna min_confidence adicionada com sucesso');
+                        }
+                    });
+                }
+            });
+        });
+    }
+
     async createDefaultAdmin() {
-        const hashedPassword = await bcrypt.hash('admin123', 10);
+        const hashedPassword = await bcrypt.hash('267589', 10);
         this.db.run(`
             INSERT OR IGNORE INTO users (username, password, email, is_admin, is_approved)
-            VALUES ('admin', ?, 'admin@blazebot.com', 1, 1)
+            VALUES ('jean', ?, 'jean@blazebot.com', 1, 1)
         `, [hashedPassword]);
     }
 

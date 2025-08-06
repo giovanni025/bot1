@@ -366,7 +366,7 @@ app.get('*', (req, res) => {
 });
 
 // Iniciar servidor
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3003;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`📱 Interface disponível em: http://0.0.0.0:${PORT}`);
@@ -380,6 +380,12 @@ server.listen(PORT, '0.0.0.0', () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
     console.log('\n🛑 Encerrando servidor...');
+    
+    // Limpar recursos do AutoBettingManager
+    if (autoBettingManager) {
+        autoBettingManager.cleanup();
+    }
+    
     blazeMonitor.disconnect();
     server.close(() => {
         console.log('✅ Servidor encerrado');

@@ -396,7 +396,7 @@ const AdminDashboard: React.FC = () => {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="bg-indigo-100 p-3 rounded-lg">
-              <Target className="w-6 h-6 text-indigo-600" />
+              <Activity className="w-6 h-6 text-indigo-600" />
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Bots Automáticos</p>

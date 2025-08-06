@@ -1,8 +1,8 @@
 const BettingStrategy = require('./bettingStrategy.cjs');
 
 /**
- * Gerenciador de apostas automatizadas - VERSÃO CORRIGIDA
- * Controla martingale, cálculo preciso de lucros e gestão de risco
+ * Gerenciador de apostas automatizadas - VERSÃO CORRIGIDA COMPLETA
+ * Sistema completo com retomada automática às 8:00 AM horário de São Paulo
  */
 class AutoBettingManager {
     constructor(database, blazeManager) {
@@ -12,6 +12,208 @@ class AutoBettingManager {
         this.userSessions = new Map(); // userId -> session data
         this.isProcessing = new Map(); // userId -> boolean
         this.pendingBets = new Map(); // userId -> bet data
+        this.resumeTimers = new Map(); // userId -> timer reference
+        
+        // Inicializar sistema de retomada
+        this.initializeResumeSystem();
+    }
+
+    /**
+     * Inicializa o sistema de retomada automática
+     */
+    async initializeResumeSystem() {
+        console.log('🌅 Inicializando sistema de retomada automática...');
+        
+        // Verificar sessões pausadas no banco e reagendar
+        try {
+            const allUsers = await this.db.getAllUsers();
+            for (const user of allUsers) {
+                const config = await this.db.getBotConfig(user.id);
+                if (config && config.auto_bet && !config.is_active) {
+                    // Usuário tinha bot automático mas está pausado
+                    console.log(`🔄 Reagendando retomada para usuário ${user.id}`);
+                    this.scheduleNextResume(user.id);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Erro ao inicializar sistema de retomada:', error.message);
+        }
+    }
+
+    /**
+     * Agenda a próxima retomada às 8:00 AM de São Paulo
+     */
+    scheduleNextResume(userId) {
+        // Limpar timer anterior se existir
+        if (this.resumeTimers.has(userId)) {
+            clearTimeout(this.resumeTimers.get(userId));
+        }
+
+        const now = new Date();
+        
+        // Criar data para 8:00 AM de São Paulo (UTC-3)
+        const saoPauloOffset = -3 * 60; // -3 horas em minutos
+        const nowSaoPaulo = new Date(now.getTime() + (now.getTimezoneOffset() + saoPauloOffset) * 60 * 1000);
+        
+        // Próximo horário de retomada: 8:00 AM de São Paulo
+        const nextResume = new Date(nowSaoPaulo);
+        nextResume.setHours(8, 0, 0, 0);
+        
+        // Se já passou das 8:00 hoje, agendar para amanhã
+        if (nowSaoPaulo.getHours() >= 8) {
+            nextResume.setDate(nextResume.getDate() + 1);
+        }
+        
+        // Converter de volta para UTC
+        const nextResumeUTC = new Date(nextResume.getTime() - (now.getTimezoneOffset() + saoPauloOffset) * 60 * 1000);
+        const timeUntilResume = nextResumeUTC.getTime() - now.getTime();
+        
+        // Garantir que o tempo seja positivo
+        if (timeUntilResume <= 0) {
+            console.log(`⚠️ Tempo de retomada inválido para usuário ${userId}, reagendando para próximo dia`);
+            const tomorrow = new Date(nextResume);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowUTC = new Date(tomorrow.getTime() - (now.getTimezoneOffset() + saoPauloOffset) * 60 * 1000);
+            const timeUntilTomorrow = tomorrowUTC.getTime() - now.getTime();
+            
+            const timer = setTimeout(() => {
+                this.resumeAutoBetting(userId);
+            }, timeUntilTomorrow);
+            
+            this.resumeTimers.set(userId, timer);
+            
+            const resumeTimeFormatted = tomorrow.toLocaleString('pt-BR', {
+                timeZone: 'America/Sao_Paulo',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            console.log(`⏰ Bot reagendado para usuário ${userId} - Retoma em ${resumeTimeFormatted} (${Math.round(timeUntilTomorrow / 1000 / 60 / 60)} horas)`);
+            return;
+        }
+        
+        // Agendar retomada
+        const timer = setTimeout(() => {
+            this.resumeAutoBetting(userId);
+        }, timeUntilResume);
+        
+        this.resumeTimers.set(userId, timer);
+        
+        const resumeTimeFormatted = nextResume.toLocaleString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        console.log(`⏰ Bot agendado para usuário ${userId} - Retoma em ${resumeTimeFormatted} (${Math.round(timeUntilResume / 1000 / 60 / 60)} horas)`);
+    }
+
+    /**
+     * Retoma apostas automáticas para um usuário
+     */
+    async resumeAutoBetting(userId) {
+        console.log(`🌅 Iniciando retomada automática para usuário ${userId} às 8:00 AM`);
+        
+        try {
+            // Verificar se o usuário ainda tem bot configurado
+            const config = await this.db.getBotConfig(userId);
+            if (!config || !config.auto_bet) {
+                console.log(`⚠️ Usuário ${userId} não tem mais bot automático configurado`);
+                return;
+            }
+
+            // Verificar se o bot do usuário está ativo
+            const userBot = await this.blazeManager.getUserBot(userId);
+            if (!userBot) {
+                console.log(`⚠️ Bot do usuário ${userId} não está inicializado, reagendando para próximo dia`);
+                this.scheduleNextResume(userId);
+                return;
+            }
+
+            // Obter saldo atual
+            const balanceResult = await this.blazeManager.getUserBalance(userId);
+            if (!balanceResult.success) {
+                console.log(`❌ Erro ao obter saldo para usuário ${userId}, tentando novamente em 5 minutos`);
+                setTimeout(() => {
+                    this.resumeAutoBetting(userId);
+                }, 5 * 60 * 1000);
+                return;
+            }
+
+            const currentBalance = balanceResult.balance.balance;
+            
+            // Criar nova sessão
+            const session = {
+                userId,
+                config: {
+                    bet_amount: config.bet_amount,
+                    profit_target: config.profit_target,
+                    stop_loss: config.stop_loss,
+                    min_confidence: config.min_confidence,
+                    strategy: config.strategy
+                },
+                initialBalance: currentBalance,
+                currentBalance: currentBalance,
+                dailyProfit: 0,
+                consecutiveLosses: 0,
+                consecutiveWins: 0,
+                totalBets: 0,
+                wins: 0,
+                losses: 0,
+                startTime: new Date(),
+                lastBetTime: null,
+                lastBetAmount: 0,
+                status: 'active',
+                dailyTarget: currentBalance * (config.profit_target / 100),
+                stopLossLimit: currentBalance * (config.stop_loss / 100),
+                maxConsecutiveLosses: 0,
+                totalWagered: 0,
+                totalWon: 0,
+                bestStreak: 0,
+                worstStreak: 0
+            };
+
+            this.userSessions.set(userId, session);
+            
+            // Atualizar configuração no banco
+            await this.db.saveBotConfig(userId, {
+                ...config,
+                is_active: true,
+                auto_bet: true
+            });
+
+            // Criar nova sessão no banco
+            await this.db.createAutoBettingSession(userId, currentBalance);
+            
+            // Limpar timer
+            this.resumeTimers.delete(userId);
+            
+            const currentTime = new Date().toLocaleString('pt-BR', {
+                timeZone: 'America/Sao_Paulo',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            console.log(`🌅 ✅ Bot retomado com sucesso para usuário ${userId} às ${currentTime}`, {
+                saldoAtual: currentBalance,
+                metaDiaria: session.dailyTarget,
+                stopLoss: session.stopLossLimit
+            });
+
+        } catch (error) {
+            console.error(`❌ Erro ao retomar bot para usuário ${userId}:`, error.message);
+            // Reagendar para próximo dia em caso de erro
+            this.scheduleNextResume(userId);
+        }
     }
 
     /**
@@ -93,6 +295,12 @@ class AutoBettingManager {
         // Criar sessão no banco
         await this.db.createAutoBettingSession(userId, initialBalance);
 
+        // Limpar qualquer timer de retomada existente
+        if (this.resumeTimers.has(userId)) {
+            clearTimeout(this.resumeTimers.get(userId));
+            this.resumeTimers.delete(userId);
+        }
+
         console.log(`✅ Bot automático iniciado para usuário ${userId}`, {
             initialBalance,
             dailyTarget: session.dailyTarget,
@@ -127,6 +335,12 @@ class AutoBettingManager {
                 });
             }
         }
+
+        // Limpar timer de retomada
+        if (this.resumeTimers.has(userId)) {
+            clearTimeout(this.resumeTimers.get(userId));
+            this.resumeTimers.delete(userId);
+        }
     }
 
     /**
@@ -149,7 +363,7 @@ class AutoBettingManager {
             // Verificar se deve parar por hoje
             if (await this.shouldStopForToday(session)) {
                 await this.pauseUntilTomorrow(userId);
-                return { processed: false, reason: 'Meta atingida ou stop loss - pausado até amanhã' };
+                return { processed: false, reason: 'Meta atingida ou stop loss - pausado até amanhã às 8:00' };
             }
 
             // Verificar cooldown entre apostas (mínimo 30 segundos)
@@ -230,7 +444,7 @@ class AutoBettingManager {
     }
 
     /**
-     * NOVO MÉTODO: Processa resultado de uma rodada da Blaze
+     * Processa resultado de uma rodada da Blaze
      */
     async processBlazeResult(blazeResult) {
         console.log(`🎰 Processando resultado da Blaze: ${blazeResult.color} (${blazeResult.roll})`);
@@ -295,11 +509,10 @@ class AutoBettingManager {
     }
 
     /**
-     * NOVO MÉTODO: Atualiza sessão no banco de dados
+     * Atualiza sessão no banco de dados
      */
     async updateSessionInDatabase(userId, session) {
         try {
-            // Buscar a sessão mais recente do usuário
             const sessions = await this.db.getUserAutoBettingSessions(userId, 1);
             if (sessions.length > 0) {
                 const sessionId = sessions[0].id;
@@ -350,7 +563,7 @@ class AutoBettingManager {
     }
 
     /**
-     * Pausa o bot até o próximo dia
+     * Pausa o bot até às 8:00 do próximo dia
      */
     async pauseUntilTomorrow(userId) {
         const session = this.userSessions.get(userId);
@@ -362,58 +575,24 @@ class AutoBettingManager {
         // Atualizar no banco
         await this.updateSessionInDatabase(userId, session);
         
-        // Calcular tempo até meia-noite
-        const now = new Date();
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(0, 0, 0, 0);
-        
-        const timeUntilTomorrow = tomorrow.getTime() - now.getTime();
-        
-        console.log(`⏰ Bot pausado até amanhã para usuário ${userId}. Retoma em ${Math.round(timeUntilTomorrow / 1000 / 60 / 60)} horas`);
-        
-        // Agendar reativação
-        setTimeout(() => {
-            this.resumeAfterPause(userId);
-        }, timeUntilTomorrow);
-    }
-
-    /**
-     * Retoma o bot após pausa diária
-     */
-    async resumeAfterPause(userId) {
-        const session = this.userSessions.get(userId);
-        if (!session || session.status !== 'paused_until_tomorrow') return;
-
-        // Reset diário
-        const balanceResult = await this.blazeManager.getUserBalance(userId);
-        if (balanceResult.success) {
-            session.currentBalance = balanceResult.balance.balance;
-            session.initialBalance = session.currentBalance; // Novo saldo base
-            session.dailyProfit = 0;
-            session.consecutiveLosses = 0;
-            session.consecutiveWins = 0;
-            session.totalBets = 0;
-            session.wins = 0;
-            session.losses = 0;
-            session.totalWagered = 0;
-            session.totalWon = 0;
-            session.status = 'active';
-            session.startTime = new Date();
-            
-            // Recalcular metas baseado no saldo atual
-            session.dailyTarget = session.currentBalance * (session.config.profit_target / 100);
-            session.stopLossLimit = session.currentBalance * (session.config.stop_loss / 100);
-            
-            // Criar nova sessão no banco
-            await this.db.createAutoBettingSession(userId, session.currentBalance);
-            
-            console.log(`🌅 Bot retomado para usuário ${userId} - Novo dia iniciado`, {
-                currentBalance: session.currentBalance,
-                dailyTarget: session.dailyTarget,
-                stopLossLimit: session.stopLossLimit
+        // Atualizar configuração no banco (manter auto_bet = true para retomar)
+        const config = await this.db.getBotConfig(userId);
+        if (config) {
+            await this.db.saveBotConfig(userId, {
+                ...config,
+                is_active: false, // Pausado temporariamente
+                auto_bet: true    // Manter para retomar automaticamente
             });
         }
+        
+        // Remover da sessão ativa
+        this.userSessions.delete(userId);
+        this.pendingBets.delete(userId);
+        
+        // Agendar retomada às 8:00 AM
+        this.scheduleNextResume(userId);
+        
+        console.log(`⏰ Bot pausado para usuário ${userId} até às 8:00 AM de amanhã`);
     }
 
     /**
@@ -447,13 +626,37 @@ class AutoBettingManager {
                 consecutiveWins: session.consecutiveWins,
                 maxConsecutiveLosses: session.maxConsecutiveLosses,
                 timeActive: Date.now() - session.startTime.getTime(),
-                nextAction: session.status === 'paused_until_tomorrow' ? 'Aguardando próximo dia' : 'Ativo',
+                nextAction: session.status === 'paused_until_tomorrow' ? 'Retoma às 8:00 AM' : 'Ativo',
                 currentBalance: session.currentBalance,
                 totalWagered: session.totalWagered,
                 totalWon: session.totalWon,
                 bestStreak: session.bestStreak,
                 worstStreak: session.worstStreak
             };
+        }
+        
+        // Adicionar usuários com timers de retomada agendados
+        for (const [userId, timer] of this.resumeTimers.entries()) {
+            if (!status[userId]) {
+                status[userId] = {
+                    status: 'paused_until_tomorrow',
+                    dailyProfit: 0,
+                    totalBets: 0,
+                    wins: 0,
+                    losses: 0,
+                    winRate: 0,
+                    consecutiveLosses: 0,
+                    consecutiveWins: 0,
+                    maxConsecutiveLosses: 0,
+                    timeActive: 0,
+                    nextAction: 'Retoma às 8:00 AM',
+                    currentBalance: 0,
+                    totalWagered: 0,
+                    totalWon: 0,
+                    bestStreak: 0,
+                    worstStreak: 0
+                };
+            }
         }
         
         return status;
@@ -464,7 +667,23 @@ class AutoBettingManager {
      */
     getUserStats(userId) {
         const session = this.userSessions.get(userId);
-        if (!session) return null;
+        if (!session) {
+            // Verificar se tem timer de retomada agendado
+            if (this.resumeTimers.has(userId)) {
+                return {
+                    status: 'paused_until_tomorrow',
+                    nextAction: 'Retoma às 8:00 AM',
+                    dailyProfit: 0,
+                    totalBets: 0,
+                    wins: 0,
+                    losses: 0,
+                    winRate: 0,
+                    consecutiveLosses: 0,
+                    timeActive: 0
+                };
+            }
+            return null;
+        }
 
         const winRate = session.totalBets > 0 ? (session.wins / session.totalBets * 100).toFixed(1) : 0;
         const profitPercent = ((session.dailyProfit / session.initialBalance) * 100).toFixed(2);
@@ -483,6 +702,24 @@ class AutoBettingManager {
             avgBetAmount: session.totalBets > 0 ? (session.totalWagered / session.totalBets).toFixed(2) : 0,
             avgWin: session.wins > 0 ? (session.totalWon / session.wins).toFixed(2) : 0
         };
+    }
+
+    /**
+     * Limpa recursos ao encerrar
+     */
+    cleanup() {
+        console.log('🧹 Limpando recursos do AutoBettingManager...');
+        
+        // Limpar todos os timers
+        for (const [userId, timer] of this.resumeTimers.entries()) {
+            clearTimeout(timer);
+            console.log(`⏰ Timer de retomada cancelado para usuário ${userId}`);
+        }
+        
+        this.resumeTimers.clear();
+        this.userSessions.clear();
+        this.pendingBets.clear();
+        this.isProcessing.clear();
     }
 }
 

@@ -7,9 +7,7 @@ import {
   Settings, 
   Play, 
   Pause, 
-  DollarSign,
   History,
-  Target,
   AlertCircle,
   CheckCircle,
   XCircle,
@@ -109,10 +107,6 @@ const UserDashboard: React.FC = () => {
   });
   
   // Estados para apostas
-  const [betForm, setBetForm] = useState({
-    color: 'vermelho',
-    amount: 1.0
-  });
   const [isBotActive, setIsBotActive] = useState(false);
   
   // Estados para apostas automáticas
@@ -287,40 +281,6 @@ const UserDashboard: React.FC = () => {
     }
   };
 
-  const placeBet = async () => {
-    if (!isBotActive) {
-      setError('Bot não está ativo. Configure os tokens primeiro.');
-      return;
-    }
-
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/protected/bot/bet', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(betForm)
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        setSuccess('Aposta realizada com sucesso!');
-        loadUserData();
-      } else {
-        setError(data.error || 'Erro ao fazer aposta');
-      }
-    } catch (error) {
-      setError('Erro de conexão');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const toggleAutoBetting = async () => {
     setIsLoading(true);
     setError('');
@@ -484,7 +444,7 @@ const UserDashboard: React.FC = () => {
         <div className="card-dark p-6">
           <div className="flex items-center">
             <div className="bg-purple-100 p-3 rounded-lg">
-              <Target className="w-6 h-6 text-purple-600" />
+              <Activity className="w-6 h-6 text-purple-600" />
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-slate-400">Taxa de Vitória</p>
@@ -552,7 +512,7 @@ const UserDashboard: React.FC = () => {
       {/* Configuração e Controles */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Configuração do Bot */}
-        <div className="card-dark">
+        <div className="card-dark lg:col-span-2">
           <div className="p-6 border-b border-slate-700">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-slate-100">Configuração do Bot</h3>
@@ -620,68 +580,6 @@ const UserDashboard: React.FC = () => {
                 </p>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Fazer Aposta Manual */}
-        <div className="card-dark">
-          <div className="p-6 border-b border-slate-700">
-            <h3 className="text-lg font-medium text-slate-100">Aposta Manual</h3>
-          </div>
-          
-          <div className="p-6">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Cor
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {['vermelho', 'preto', 'branco'].map((color) => (
-                    <button
-                      key={color}
-                      onClick={() => setBetForm({ ...betForm, color })}
-                      className={`p-3 rounded-lg border-2 transition-all ${
-                        betForm.color === color 
-                          ? 'neon-border' 
-                          : 'border-slate-600 hover:border-slate-500'
-                      }`}
-                    >
-                      <div className={`w-6 h-6 rounded-full mx-auto mb-1 ${getColorClass(color)}`} />
-                      <span className="text-xs font-medium capitalize text-slate-200">{color}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Valor (R$)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={betForm.amount}
-                  onChange={(e) => setBetForm({ ...betForm, amount: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-md text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                />
-              </div>
-              
-              <button
-                onClick={placeBet}
-                disabled={isLoading || !isBotActive}
-                className="w-full gradient-success text-white py-2 px-4 rounded-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 flex items-center justify-center"
-              >
-                {isLoading ? (
-                  <div className="w-5 h-5 spinner" />
-                ) : (
-                  <>
-                    <DollarSign className="w-4 h-4 mr-2" />
-                    Apostar
-                  </>
-                )}
-              </button>
-            </div>
           </div>
         </div>
       </div>

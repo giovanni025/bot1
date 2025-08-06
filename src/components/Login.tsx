@@ -163,14 +163,6 @@ const Login: React.FC = () => {
             {isLogin ? 'Não tem conta? Cadastre-se' : 'Já tem conta? Entre'}
           </button>
         </div>
-
-        {isLogin && (
-          <div className="mt-4 text-center">
-            <p className="text-slate-400 text-xs">
-              Admin padrão: <span className="text-orange-400">admin</span> / <span className="text-orange-400">admin123</span>
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );
